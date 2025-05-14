@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useToast } from '@/components/ui/toast';
+import { useToast } from '@/components/ui/use-toast';
 
 interface LocationState {
   selectedTheme?: StoryTheme;
