@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
@@ -55,7 +54,7 @@ const StoryDisplay: React.FC = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
       
-      const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
+      const response = await fetch('https://primary-production-470e.up.railway.app/webhook-test/1', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
