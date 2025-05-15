@@ -1,10 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
-import { Play, Pause, Book, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { toast } from "@/components/ui/use-toast";
 
 const StoryDisplay: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -13,6 +14,9 @@ const StoryDisplay: React.FC = () => {
   const [isReading, setIsReading] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [storyPages, setStoryPages] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   
   const story = id ? getStoryById(id) : null;
   
@@ -25,34 +29,147 @@ const StoryDisplay: React.FC = () => {
     }
   }, [story, setCurrentStory]);
 
-  const handleStartReading = () => {
-    setIsReading(true);
-    // Here you would connect to the voice model
-    console.log('Starting to read story with voice model');
-    // For now, we'll just simulate the reading
+  useEffect(() => {
+    // Cleanup audio when component unmounts or when audio URL changes
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        if (audioUrl) {
+          URL.revokeObjectURL(audioUrl);
+        }
+      }
+    };
+  }, [audioUrl]);
+
+  const handleStartReading = async () => {
+    try {
+      setIsLoading(true);
+      setIsReading(true);
+      
+      const currentPageText = storyPages[currentPage];
+      const storyTitle = story ? story.title : '';
+
+      toast({
+        title: "Generating audio",
+        description: "Sending request to ElevenLabs via n8n...",
+      });
+
+      // Send request to your n8n webhook
+      const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: currentPageText,
+          title: storyTitle,
+          page: currentPage + 1,
+          totalPages: storyPages.length
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get audio from n8n webhook');
+      }
+
+      // The response should contain the audio data from ElevenLabs
+      const audioBlob = await response.blob();
+      
+      // Create a URL for the audio blob
+      const url = URL.createObjectURL(audioBlob);
+      setAudioUrl(url);
+      
+      // Create and play the audio element
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+        
+        // Add event listener for when audio ends
+        audioRef.current.onended = () => {
+          setIsReading(false);
+        };
+      }
+
+      toast({
+        title: "Audio ready",
+        description: "Your story is now being read aloud.",
+      });
+    } catch (error) {
+      console.error('Error getting audio:', error);
+      setIsReading(false);
+      toast({
+        title: "Error",
+        description: "Failed to generate audio. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleStopReading = () => {
     setIsReading(false);
-    // Stop the voice model
-    console.log('Stopping the voice reading');
+    // Stop the audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    toast({
+      title: "Paused",
+      description: "Audio playback paused.",
+    });
   };
 
   const nextPage = () => {
     if (currentPage < storyPages.length - 1) {
+      // Stop current audio if playing
+      if (isReading && audioRef.current) {
+        audioRef.current.pause();
+        setIsReading(false);
+      }
+      
       setCurrentPage(currentPage + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      // Clear current audio URL
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
     }
   };
 
   const prevPage = () => {
     if (currentPage > 0) {
+      // Stop current audio if playing
+      if (isReading && audioRef.current) {
+        audioRef.current.pause();
+        setIsReading(false);
+      }
+      
       setCurrentPage(currentPage - 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      // Clear current audio URL
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
     }
   };
 
   const navigateToRandomStory = () => {
+    // Stop current audio if playing
+    if (isReading && audioRef.current) {
+      audioRef.current.pause();
+      setIsReading(false);
+    }
+    
+    // Clear current audio URL
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    
     const otherStories = stories.filter(s => s.id !== id);
     if (otherStories.length > 0) {
       const randomStory = otherStories[Math.floor(Math.random() * otherStories.length)];
@@ -100,7 +217,7 @@ const StoryDisplay: React.FC = () => {
             <Button
               variant="outline"
               onClick={prevPage}
-              disabled={currentPage === 0}
+              disabled={currentPage === 0 || isLoading}
               className="rounded-full"
               size="icon"
             >
@@ -111,25 +228,51 @@ const StoryDisplay: React.FC = () => {
               <Button
                 onClick={handleStopReading}
                 variant="outline"
+                disabled={isLoading}
                 className="rounded-full flex items-center gap-2"
               >
-                <Pause className="h-4 w-4" />
-                <span>Pause</span>
+                {isLoading ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Processing...
+                  </span>
+                ) : (
+                  <>
+                    <Pause className="h-4 w-4" />
+                    <span>Pause</span>
+                  </>
+                )}
               </Button>
             ) : (
               <Button
                 onClick={handleStartReading}
+                disabled={isLoading}
                 className="bg-primary hover:bg-primary/90 rounded-full flex items-center gap-2"
               >
-                <Play className="h-4 w-4" />
-                <span>Read Aloud</span>
+                {isLoading ? (
+                  <span className="flex items-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Generating...
+                  </span>
+                ) : (
+                  <>
+                    <Volume2 className="h-4 w-4" />
+                    <span>Read Aloud</span>
+                  </>
+                )}
               </Button>
             )}
             
             <Button
               variant="outline"
               onClick={nextPage}
-              disabled={currentPage === storyPages.length - 1}
+              disabled={currentPage === storyPages.length - 1 || isLoading}
               className="rounded-full"
               size="icon"
             >
@@ -149,6 +292,9 @@ const StoryDisplay: React.FC = () => {
           <span>Read Another Story</span>
         </Button>
       </div>
+
+      {/* Hidden audio element for playing the audio */}
+      <audio ref={audioRef} style={{ display: 'none' }} />
     </div>
   );
 };
