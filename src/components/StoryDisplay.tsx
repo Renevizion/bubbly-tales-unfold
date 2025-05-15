@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
 import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "@/hooks/use-toast";
 
 const StoryDisplay: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -54,52 +53,59 @@ const StoryDisplay: React.FC = () => {
         description: "Sending request to ElevenLabs via n8n...",
       });
 
-      // Send request to your n8n webhook
-      const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: currentPageText,
-          title: storyTitle,
-          page: currentPage + 1,
-          totalPages: storyPages.length
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get audio from n8n webhook');
-      }
-
-      // The response should contain the audio data from ElevenLabs
-      const audioBlob = await response.blob();
-      
-      // Create a URL for the audio blob
-      const url = URL.createObjectURL(audioBlob);
-      setAudioUrl(url);
-      
-      // Create and play the audio element
-      if (audioRef.current) {
-        audioRef.current.src = url;
-        audioRef.current.play();
+      // Send request to your n8n webhook with no-cors mode
+      try {
+        await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          mode: 'no-cors', // Add no-cors mode to handle CORS issues
+          body: JSON.stringify({
+            text: currentPageText,
+            title: storyTitle,
+            page: currentPage + 1,
+            totalPages: storyPages.length
+          }),
+        });
         
-        // Add event listener for when audio ends
-        audioRef.current.onended = () => {
-          setIsReading(false);
-        };
+        console.log("Request sent to webhook");
+        
+        // Since we can't get a real response with no-cors, create a placeholder audio
+        // This is just a temporary solution until a proper CORS-enabled endpoint is available
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        gainNode.gain.value = 0.1; // Very low volume
+        oscillator.frequency.value = 440; // A4 note
+        oscillator.start();
+        
+        // Play for 1 second
+        setTimeout(() => {
+          oscillator.stop();
+          
+          toast({
+            title: "Audio ready",
+            description: "A placeholder audio was played. To get real audio, the webhook needs CORS headers.",
+          });
+          
+        }, 1000);
+        
+      } catch (error) {
+        console.error('Error sending request to webhook:', error);
+        throw new Error('Failed to send request to webhook');
       }
 
-      toast({
-        title: "Audio ready",
-        description: "Your story is now being read aloud.",
-      });
     } catch (error) {
       console.error('Error getting audio:', error);
       setIsReading(false);
       toast({
         title: "Error",
-        description: "Failed to generate audio. Please try again.",
+        description: "Failed to generate audio. The webhook doesn't have CORS headers enabled.",
         variant: "destructive",
       });
     } finally {

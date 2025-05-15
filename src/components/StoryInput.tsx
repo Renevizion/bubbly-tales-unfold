@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 
 interface LocationState {
   selectedTheme?: StoryTheme;
@@ -42,25 +41,24 @@ const StoryInput: React.FC = () => {
         headers: {
           'Content-Type': 'application/json',
         },
+        mode: 'no-cors', // Add no-cors mode to handle CORS issues
         body: JSON.stringify(storyData),
       });
       
-      if (!response.ok) {
-        console.error('Webhook error:', response.status);
-        toast({
-          title: "Webhook notification failed",
-          description: "We couldn't notify the webhook about your new story, but your story was saved.",
-          variant: "destructive",
-        });
-      } else {
-        console.log('Webhook successful');
-        toast({
-          title: "Webhook notified",
-          description: "Your story was successfully sent to the webhook.",
-        });
-      }
+      // Since we're using no-cors, we can't check response.ok
+      // Instead, we'll assume success if the fetch doesn't throw an error
+      console.log('Webhook request sent');
+      toast({
+        title: "Story information sent",
+        description: "Your story details were sent to the webhook.",
+      });
     } catch (error) {
       console.error('Error sending to webhook:', error);
+      toast({
+        title: "Webhook notification failed",
+        description: "We couldn't notify the webhook about your story, but your story was saved.",
+        variant: "destructive",
+      });
     } finally {
       setIsSendingToWebhook(false);
     }
