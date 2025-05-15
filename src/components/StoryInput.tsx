@@ -1,12 +1,14 @@
+
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useStory, StoryTheme } from '../contexts/StoryContext';
-import { Play, BookOpen, Book, ArrowRight } from 'lucide-react';
+import { Play, BookOpen, Book, ArrowRight, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Select,
   SelectContent,
@@ -20,6 +22,9 @@ interface LocationState {
   selectedTheme?: StoryTheme;
 }
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1000; // 1 second
+
 const StoryInput: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -32,10 +37,19 @@ const StoryInput: React.FC = () => {
   const [theme, setTheme] = useState<StoryTheme>(locationState?.selectedTheme || 'fantasy');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSendingToWebhook, setIsSendingToWebhook] = useState(false);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
 
-  const sendToWebhook = async (storyData: { title: string; content: string; theme: StoryTheme }) => {
+  const sendToWebhook = async (storyData: { title: string; content: string; theme: StoryTheme }, retries = 0) => {
     try {
       setIsSendingToWebhook(true);
+      setWebhookError(null);
+      
+      console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, storyData);
+      
+      // Create a controller to handle timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
       const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
         method: 'POST',
         headers: {
@@ -43,20 +57,40 @@ const StoryInput: React.FC = () => {
         },
         mode: 'no-cors', // Add no-cors mode to handle CORS issues
         body: JSON.stringify(storyData),
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
       
       // Since we're using no-cors, we can't check response.ok
       // Instead, we'll assume success if the fetch doesn't throw an error
       console.log('Webhook request sent');
       toast({
         title: "Story information sent",
-        description: "Your story details were sent to the webhook.",
+        description: "Your story details were sent to the workflow.",
       });
-    } catch (error) {
+      setWebhookError(null);
+    } catch (error: any) {
       console.error('Error sending to webhook:', error);
+      
+      // Try again if we haven't exceeded max retries
+      if (retries < MAX_RETRIES) {
+        toast({
+          title: "Retrying webhook",
+          description: `Retrying webhook call (${retries + 1}/${MAX_RETRIES})...`,
+        });
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        return sendToWebhook(storyData, retries + 1);
+      }
+      
+      const errorMessage = error.message || "Unknown error occurred";
+      setWebhookError(`Failed to send to workflow: ${errorMessage}`);
+      
       toast({
         title: "Webhook notification failed",
-        description: "We couldn't notify the webhook about your story, but your story was saved.",
+        description: "We couldn't notify the workflow about your story, but your story was saved locally.",
         variant: "destructive",
       });
     } finally {
@@ -88,6 +122,7 @@ const StoryInput: React.FC = () => {
     // Send story to webhook
     await sendToWebhook({ title, content, theme });
     
+    // Even if webhook fails, we still add the story locally
     addStory(newStory);
     setCurrentStory(newStory);
     
@@ -148,6 +183,13 @@ const StoryInput: React.FC = () => {
   return (
     <div className="page-container">
       <h1 className="text-3xl font-bold mb-8 text-center">Create Your Story</h1>
+      
+      {webhookError && (
+        <Alert variant="destructive" className="mb-6">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{webhookError}</AlertDescription>
+        </Alert>
+      )}
       
       <div className="story-card bg-white mb-8">
         <form onSubmit={handleSubmit} className="space-y-6">

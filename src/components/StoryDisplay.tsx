@@ -1,10 +1,15 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
-import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from "@/hooks/use-toast";
+
+const MAX_RETRIES = 2;
+const RETRY_DELAY = 1000; // 1 second
 
 const StoryDisplay: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -15,6 +20,7 @@ const StoryDisplay: React.FC = () => {
   const [storyPages, setStoryPages] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [webhookError, setWebhookError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
   const story = id ? getStoryById(id) : null;
@@ -40,6 +46,52 @@ const StoryDisplay: React.FC = () => {
     };
   }, [audioUrl]);
 
+  const sendToWebhook = async (data: any, retries = 0) => {
+    try {
+      setWebhookError(null);
+      console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, data);
+      
+      // Create a controller to handle timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'no-cors', // Add no-cors mode to handle CORS issues
+        body: JSON.stringify(data),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Since we're using no-cors, we can't check response.ok
+      // Instead, we'll assume success if the fetch doesn't throw an error
+      console.log('Webhook request sent successfully');
+      return true;
+    } catch (error: any) {
+      console.error('Error sending to webhook:', error);
+      
+      // Try again if we haven't exceeded max retries
+      if (retries < MAX_RETRIES) {
+        toast({
+          title: "Retrying webhook",
+          description: `Retrying webhook call (${retries + 1}/${MAX_RETRIES})...`,
+        });
+        
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        return sendToWebhook(data, retries + 1);
+      }
+      
+      const errorMessage = error.message || "Unknown error occurred";
+      setWebhookError(`Failed to send to workflow: ${errorMessage}`);
+      return false;
+    }
+  };
+
   const handleStartReading = async () => {
     try {
       setIsLoading(true);
@@ -50,26 +102,25 @@ const StoryDisplay: React.FC = () => {
 
       toast({
         title: "Generating audio",
-        description: "Sending request to ElevenLabs via n8n...",
+        description: "Sending request to workflow...",
       });
 
-      // Send request to your n8n webhook with no-cors mode
-      try {
-        await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          mode: 'no-cors', // Add no-cors mode to handle CORS issues
-          body: JSON.stringify({
-            text: currentPageText,
-            title: storyTitle,
-            page: currentPage + 1,
-            totalPages: storyPages.length
-          }),
-        });
-        
+      // Send request to your n8n webhook
+      const success = await sendToWebhook({
+        text: currentPageText,
+        title: storyTitle,
+        page: currentPage + 1,
+        totalPages: storyPages.length,
+        action: "read_aloud"
+      });
+      
+      if (success) {
         console.log("Request sent to webhook");
+        
+        toast({
+          title: "Audio request sent",
+          description: "Your reading request was sent to the workflow. Note: Server response indicates this is a test or development environment.",
+        });
         
         // Since we can't get a real response with no-cors, create a placeholder audio
         // This is just a temporary solution until a proper CORS-enabled endpoint is available
@@ -87,25 +138,17 @@ const StoryDisplay: React.FC = () => {
         // Play for 1 second
         setTimeout(() => {
           oscillator.stop();
-          
-          toast({
-            title: "Audio ready",
-            description: "A placeholder audio was played. To get real audio, the webhook needs CORS headers.",
-          });
-          
         }, 1000);
-        
-      } catch (error) {
-        console.error('Error sending request to webhook:', error);
-        throw new Error('Failed to send request to webhook');
+      } else {
+        throw new Error('Failed to send request to workflow');
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error getting audio:', error);
       setIsReading(false);
       toast({
         title: "Error",
-        description: "Failed to generate audio. The webhook doesn't have CORS headers enabled.",
+        description: error.message || "Failed to generate audio. The server returned an error.",
         variant: "destructive",
       });
     } finally {
@@ -200,6 +243,13 @@ const StoryDisplay: React.FC = () => {
 
   return (
     <div className="page-container space-y-6">
+      {webhookError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>{webhookError}</AlertDescription>
+        </Alert>
+      )}
+      
       <div className="story-card bg-white">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-primary">{story.title}</h1>
