@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,8 +32,41 @@ const StoryInput: React.FC = () => {
   const [content, setContent] = useState('');
   const [theme, setTheme] = useState<StoryTheme>(locationState?.selectedTheme || 'fantasy');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSendingToWebhook, setIsSendingToWebhook] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const sendToWebhook = async (storyData: { title: string; content: string; theme: StoryTheme }) => {
+    try {
+      setIsSendingToWebhook(true);
+      const response = await fetch('https://primary-production-470e.up.railway.app/webhook/6822f3a1-389b-4b18-84c9-95ce2137f30a', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(storyData),
+      });
+      
+      if (!response.ok) {
+        console.error('Webhook error:', response.status);
+        toast({
+          title: "Webhook notification failed",
+          description: "We couldn't notify the webhook about your new story, but your story was saved.",
+          variant: "destructive",
+        });
+      } else {
+        console.log('Webhook successful');
+        toast({
+          title: "Webhook notified",
+          description: "Your story was successfully sent to the webhook.",
+        });
+      }
+    } catch (error) {
+      console.error('Error sending to webhook:', error);
+    } finally {
+      setIsSendingToWebhook(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!title.trim() || !content.trim()) {
@@ -53,6 +87,9 @@ const StoryInput: React.FC = () => {
       custom: true,
     };
     
+    // Send story to webhook
+    await sendToWebhook({ title, content, theme });
+    
     addStory(newStory);
     setCurrentStory(newStory);
     
@@ -64,37 +101,50 @@ const StoryInput: React.FC = () => {
     navigate(`/story/${newStory.id}`);
   };
 
-  const generateRandomStory = () => {
+  const generateRandomStory = async () => {
     setIsGenerating(true);
     // Here you would connect to an API for story generation
     // For now, we'll just simulate it
     
-    setTimeout(() => {
-      const storyTitles = [
-        "The Adventure of the Magic Key",
-        "Whispers in the Woodland",
-        "Starlight Dreams",
-        "The Rainbow Dragon",
-        "Journey to the Cloud Kingdom"
-      ];
-      
-      const storyStarters = [
-        "Once upon a time in a land filled with wonder and magic, a young explorer discovered a hidden path that nobody had noticed before...",
-        "In the heart of the Whispering Woods lived a family of talking animals who kept a very important secret...",
-        "When the stars began to disappear from the night sky, only one brave child noticed and decided to find out why...",
-        "The old treasure map had been in the family for generations, but nobody believed it was real until that rainy afternoon...",
-        "The tiny door appeared in the garden overnight, and curious little footprints led right to it..."
-      ];
-      
-      setTitle(storyTitles[Math.floor(Math.random() * storyTitles.length)]);
-      setContent(storyStarters[Math.floor(Math.random() * storyStarters.length)]);
+    try {
+      setTimeout(async () => {
+        const storyTitles = [
+          "The Adventure of the Magic Key",
+          "Whispers in the Woodland",
+          "Starlight Dreams",
+          "The Rainbow Dragon",
+          "Journey to the Cloud Kingdom"
+        ];
+        
+        const storyStarters = [
+          "Once upon a time in a land filled with wonder and magic, a young explorer discovered a hidden path that nobody had noticed before...",
+          "In the heart of the Whispering Woods lived a family of talking animals who kept a very important secret...",
+          "When the stars began to disappear from the night sky, only one brave child noticed and decided to find out why...",
+          "The old treasure map had been in the family for generations, but nobody believed it was real until that rainy afternoon...",
+          "The tiny door appeared in the garden overnight, and curious little footprints led right to it..."
+        ];
+        
+        const generatedTitle = storyTitles[Math.floor(Math.random() * storyTitles.length)];
+        const generatedContent = storyStarters[Math.floor(Math.random() * storyStarters.length)];
+        
+        setTitle(generatedTitle);
+        setContent(generatedContent);
+        
+        // Send generated story to webhook
+        await sendToWebhook({
+          title: generatedTitle,
+          content: generatedContent,
+          theme
+        });
+        
+        toast({
+          title: "Story generated!",
+          description: "We've created a story starter for you to continue.",
+        });
+      }, 1500);
+    } finally {
       setIsGenerating(false);
-      
-      toast({
-        title: "Story generated!",
-        description: "We've created a story starter for you to continue.",
-      });
-    }, 1500);
+    }
   };
 
   return (
@@ -153,7 +203,7 @@ const StoryInput: React.FC = () => {
               type="button"
               variant="outline"
               onClick={generateRandomStory}
-              disabled={isGenerating}
+              disabled={isGenerating || isSendingToWebhook}
               className="rounded-full flex items-center gap-2"
             >
               <Book className="h-4 w-4" />
@@ -162,10 +212,11 @@ const StoryInput: React.FC = () => {
             
             <Button 
               type="submit"
+              disabled={isSendingToWebhook}
               className="rounded-full flex items-center gap-2 bg-primary hover:bg-primary/90"
             >
               <BookOpen className="h-4 w-4" />
-              Create Story
+              {isSendingToWebhook ? 'Creating...' : 'Create Story'}
               <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
