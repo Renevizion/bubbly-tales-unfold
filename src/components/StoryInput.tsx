@@ -23,6 +23,7 @@ interface LocationState {
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY = 1000; // 1 second
+const WEBHOOK_URL = 'https://primary-production-470e.up.railway.app/webhook-test/6822f3a1-389b-4b18-84c9-95ce2137f30a';
 
 const StoryInput: React.FC = () => {
   const navigate = useNavigate();
@@ -38,32 +39,41 @@ const StoryInput: React.FC = () => {
   const [isSendingToWebhook, setIsSendingToWebhook] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
 
-  const sendToWebhook = async (storyData: { title: string; content: string; theme: StoryTheme }, retries = 0) => {
+  const sendToWebhook = async (storyData: { title: string; content?: string; theme: StoryTheme }, retries = 0) => {
     try {
       setIsSendingToWebhook(true);
       setWebhookError(null);
       
       console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, storyData);
       
+      // Format the data according to the required format
+      const webhookPayload = {
+        title: storyData.title,
+        subject: storyData.theme
+      };
+      
+      console.log('Webhook payload:', webhookPayload);
+      
       // Create a controller to handle timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
       
-      const response = await fetch('https://primary-production-470e.up.railway.app/webhook-test/1', {
+      const response = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        mode: 'no-cors', // Add no-cors mode to handle CORS issues
-        body: JSON.stringify(storyData),
+        body: JSON.stringify(webhookPayload),
         signal: controller.signal
       });
       
       clearTimeout(timeoutId);
       
-      // Since we're using no-cors, we can't check response.ok
-      // Instead, we'll assume success if the fetch doesn't throw an error
-      console.log('Webhook request sent');
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
+      console.log('Webhook request successful');
       toast({
         title: "Story information sent",
         description: "Your story details were sent to the workflow.",
@@ -119,7 +129,7 @@ const StoryInput: React.FC = () => {
     };
     
     // Send story to webhook
-    await sendToWebhook({ title, content, theme });
+    await sendToWebhook({ title, theme });
     
     // Even if webhook fails, we still add the story locally
     addStory(newStory);
@@ -165,7 +175,6 @@ const StoryInput: React.FC = () => {
         // Send generated story to webhook
         await sendToWebhook({
           title: generatedTitle,
-          content: generatedContent,
           theme
         });
         

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
@@ -9,6 +10,7 @@ import { toast } from "@/hooks/use-toast";
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY = 1000; // 1 second
+const WEBHOOK_URL = 'https://primary-production-470e.up.railway.app/webhook-test/6822f3a1-389b-4b18-84c9-95ce2137f30a';
 
 const StoryDisplay: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -50,24 +52,33 @@ const StoryDisplay: React.FC = () => {
       setWebhookError(null);
       console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, data);
       
+      // Format the webhook payload according to the required format
+      const webhookPayload = {
+        title: data.title || "Story Reading",
+        subject: data.action || "read_aloud"
+      };
+      
+      console.log('Webhook payload:', webhookPayload);
+      
       // Create a controller to handle timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
       
-      const response = await fetch('https://primary-production-470e.up.railway.app/webhook-test/1', {
+      const response = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        mode: 'no-cors', // Add no-cors mode to handle CORS issues
-        body: JSON.stringify(data),
+        body: JSON.stringify(webhookPayload),
         signal: controller.signal
       });
       
       clearTimeout(timeoutId);
       
-      // Since we're using no-cors, we can't check response.ok
-      // Instead, we'll assume success if the fetch doesn't throw an error
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
       console.log('Webhook request sent successfully');
       return true;
     } catch (error: any) {
@@ -104,7 +115,7 @@ const StoryDisplay: React.FC = () => {
         description: "Sending request to workflow...",
       });
 
-      // Send request to your n8n webhook
+      // Send request to your webhook
       const success = await sendToWebhook({
         text: currentPageText,
         title: storyTitle,
@@ -118,11 +129,11 @@ const StoryDisplay: React.FC = () => {
         
         toast({
           title: "Audio request sent",
-          description: "Your reading request was sent to the workflow. Note: Server response indicates this is a test or development environment.",
+          description: "Your reading request was sent to the workflow.",
         });
         
-        // Since we can't get a real response with no-cors, create a placeholder audio
-        // This is just a temporary solution until a proper CORS-enabled endpoint is available
+        // Since we can't get a real audio response yet, create a placeholder audio
+        // This is just a temporary solution
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
@@ -352,6 +363,78 @@ const StoryDisplay: React.FC = () => {
       <audio ref={audioRef} style={{ display: 'none' }} />
     </div>
   );
+  
+  const handleStopReading = () => {
+    setIsReading(false);
+    // Stop the audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    toast({
+      title: "Paused",
+      description: "Audio playback paused.",
+    });
+  };
+
+  const nextPage = () => {
+    if (currentPage < storyPages.length - 1) {
+      // Stop current audio if playing
+      if (isReading && audioRef.current) {
+        audioRef.current.pause();
+        setIsReading(false);
+      }
+      
+      setCurrentPage(currentPage + 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      // Clear current audio URL
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
+    }
+  };
+
+  const prevPage = () => {
+    if (currentPage > 0) {
+      // Stop current audio if playing
+      if (isReading && audioRef.current) {
+        audioRef.current.pause();
+        setIsReading(false);
+      }
+      
+      setCurrentPage(currentPage - 1);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      
+      // Clear current audio URL
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+        setAudioUrl(null);
+      }
+    }
+  };
+
+  const navigateToRandomStory = () => {
+    // Stop current audio if playing
+    if (isReading && audioRef.current) {
+      audioRef.current.pause();
+      setIsReading(false);
+    }
+    
+    // Clear current audio URL
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl(null);
+    }
+    
+    const otherStories = stories.filter(s => s.id !== id);
+    if (otherStories.length > 0) {
+      const randomStory = otherStories[Math.floor(Math.random() * otherStories.length)];
+      navigate(`/story/${randomStory.id}`);
+    } else {
+      navigate('/');
+    }
+  };
 };
 
 export default StoryDisplay;
