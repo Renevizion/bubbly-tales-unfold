@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useStory } from '../contexts/StoryContext';
-import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Book, ArrowLeft, ArrowRight, Volume2, VolumeX, AlertTriangle, Headphones } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -55,14 +55,15 @@ const StoryDisplay: React.FC = () => {
       // Format the webhook payload according to the required format
       const webhookPayload = {
         title: data.title || "Story Reading",
-        subject: data.action || "read_aloud"
+        subject: data.action || "read_aloud",
+        content: data.text || ""  // Include the text content in the request
       };
       
       console.log('Webhook payload:', webhookPayload);
       
       // Create a controller to handle timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout (increased to allow time for audio processing)
       
       const response = await fetch(WEBHOOK_URL, {
         method: 'POST',
@@ -79,8 +80,35 @@ const StoryDisplay: React.FC = () => {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
       
-      console.log('Webhook request sent successfully');
-      return true;
+      // Check if the response contains audio data
+      const contentType = response.headers.get('Content-Type') || '';
+      
+      if (contentType.includes('audio') || contentType.includes('application/octet-stream')) {
+        // Process audio response
+        const audioBlob = await response.blob();
+        const audioObjectUrl = URL.createObjectURL(audioBlob);
+        setAudioUrl(audioObjectUrl);
+        
+        console.log('Audio response received and processed');
+        
+        // Play audio
+        if (audioRef.current) {
+          audioRef.current.src = audioObjectUrl;
+          audioRef.current.play();
+        }
+        
+        return { success: true, hasAudio: true };
+      } else {
+        // Try to parse JSON response
+        try {
+          const jsonData = await response.json();
+          console.log('Webhook response:', jsonData);
+          return { success: true, hasAudio: false, data: jsonData };
+        } catch (e) {
+          console.log('Response is not JSON, raw response:', await response.text());
+          return { success: true, hasAudio: false };
+        }
+      }
     } catch (error: any) {
       console.error('Error sending to webhook:', error);
       
@@ -98,14 +126,13 @@ const StoryDisplay: React.FC = () => {
       
       const errorMessage = error.message || "Unknown error occurred";
       setWebhookError(`Failed to send to workflow: ${errorMessage}`);
-      return false;
+      return { success: false, error: errorMessage };
     }
   };
 
   const handleStartReading = async () => {
     try {
       setIsLoading(true);
-      setIsReading(true);
       
       const currentPageText = storyPages[currentPage];
       const storyTitle = story ? story.title : '';
@@ -116,7 +143,7 @@ const StoryDisplay: React.FC = () => {
       });
 
       // Send request to your webhook
-      const success = await sendToWebhook({
+      const result = await sendToWebhook({
         text: currentPageText,
         title: storyTitle,
         page: currentPage + 1,
@@ -124,35 +151,39 @@ const StoryDisplay: React.FC = () => {
         action: "read_aloud"
       });
       
-      if (success) {
-        console.log("Request sent to webhook");
-        
-        toast({
-          title: "Audio request sent",
-          description: "Your reading request was sent to the workflow.",
-        });
-        
-        // Since we can't get a real audio response yet, create a placeholder audio
-        // This is just a temporary solution
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        gainNode.gain.value = 0.1; // Very low volume
-        oscillator.frequency.value = 440; // A4 note
-        oscillator.start();
-        
-        // Play for 1 second
-        setTimeout(() => {
-          oscillator.stop();
-        }, 1000);
+      if (result.success) {
+        if (result.hasAudio) {
+          setIsReading(true);
+          toast({
+            title: "Audio generated",
+            description: "Playing audio response from n8n workflow.",
+          });
+        } else {
+          // No audio in response, but webhook was successful
+          toast({
+            title: "Request successful",
+            description: "Your request was processed, but no audio was returned.",
+          });
+          // Create a placeholder audio if we didn't get real audio
+          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          gainNode.gain.value = 0.1; // Very low volume
+          oscillator.frequency.value = 440; // A4 note
+          oscillator.start();
+          
+          // Play for 1 second
+          setTimeout(() => {
+            oscillator.stop();
+          }, 1000);
+        }
       } else {
-        throw new Error('Failed to send request to workflow');
+        throw new Error('Failed to receive audio from workflow');
       }
-
     } catch (error: any) {
       console.error('Error getting audio:', error);
       setIsReading(false);
@@ -328,7 +359,11 @@ const StoryDisplay: React.FC = () => {
                   </span>
                 ) : (
                   <>
-                    <Volume2 className="h-4 w-4" />
+                    {audioUrl ? (
+                      <Headphones className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
                     <span>Read Aloud</span>
                   </>
                 )}
@@ -359,8 +394,21 @@ const StoryDisplay: React.FC = () => {
         </Button>
       </div>
 
-      {/* Hidden audio element for playing the audio */}
-      <audio ref={audioRef} style={{ display: 'none' }} />
+      {/* Audio element for playing the returned audio */}
+      <audio 
+        ref={audioRef} 
+        style={{ display: 'none' }}
+        onEnded={() => setIsReading(false)}
+        onError={(e) => {
+          console.error('Audio playback error:', e);
+          toast({
+            title: "Playback Error",
+            description: "There was an error playing the audio file.",
+            variant: "destructive",
+          });
+          setIsReading(false);
+        }}
+      />
     </div>
   );
 };
