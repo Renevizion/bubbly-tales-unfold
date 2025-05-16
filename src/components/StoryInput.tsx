@@ -47,23 +47,28 @@ const StoryInput: React.FC = () => {
       
       console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, storyData);
       
+      // Get the current URL for the callback
+      const currentUrl = window.location.href;
+      
       // Format the data according to the required format
       const webhookPayload = {
         title: storyData.title,
         subject: storyData.theme,
-        content: storyData.content // Include the content in the payload
+        content: storyData.content, // Include the content in the payload
+        callback_url: currentUrl // Add the callback URL
       };
       
       console.log('Webhook payload:', webhookPayload);
       
       // Create a controller to handle timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 second timeout (increased)
       
       const response = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify(webhookPayload),
         signal: controller.signal

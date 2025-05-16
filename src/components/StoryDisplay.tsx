@@ -52,23 +52,28 @@ const StoryDisplay: React.FC = () => {
       setWebhookError(null);
       console.log(`Sending data to webhook (attempt ${retries + 1}/${MAX_RETRIES + 1}):`, data);
       
+      // Get the current URL for the callback
+      const currentUrl = window.location.href;
+      
       // Format the webhook payload according to the required format
       const webhookPayload = {
         title: data.title || "Story Reading",
         subject: data.action || "read_aloud",
-        content: data.text || ""  // Include the text content in the request
+        content: data.text || "",  // Include the text content in the request
+        callback_url: currentUrl   // Add the callback URL to let n8n know where to send the response
       };
       
       console.log('Webhook payload:', webhookPayload);
       
       // Create a controller to handle timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout (increased to allow time for audio processing)
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout (increased to allow time for audio processing)
       
       const response = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'audio/*, application/octet-stream', // Accept audio content types
         },
         body: JSON.stringify(webhookPayload),
         signal: controller.signal
@@ -94,7 +99,14 @@ const StoryDisplay: React.FC = () => {
         // Play audio
         if (audioRef.current) {
           audioRef.current.src = audioObjectUrl;
-          audioRef.current.play();
+          audioRef.current.play().catch(error => {
+            console.error('Error playing audio:', error);
+            toast({
+              title: "Playback Error",
+              description: "Could not play audio automatically. Please try again.",
+              variant: "destructive",
+            });
+          });
         }
         
         return { success: true, hasAudio: true };
