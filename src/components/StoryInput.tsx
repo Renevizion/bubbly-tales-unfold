@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -39,7 +40,7 @@ const StoryInput: React.FC = () => {
   const [isSendingToWebhook, setIsSendingToWebhook] = useState(false);
   const [webhookError, setWebhookError] = useState<string | null>(null);
 
-  const sendToWebhook = async (storyData: { title: string; content?: string; theme: StoryTheme }, retries = 0) => {
+  const sendToWebhook = async (storyData: { title: string; content: string; theme: StoryTheme }, retries = 0) => {
     try {
       setIsSendingToWebhook(true);
       setWebhookError(null);
@@ -49,7 +50,8 @@ const StoryInput: React.FC = () => {
       // Format the data according to the required format
       const webhookPayload = {
         title: storyData.title,
-        subject: storyData.theme
+        subject: storyData.theme,
+        content: storyData.content // Include the content in the payload
       };
       
       console.log('Webhook payload:', webhookPayload);
@@ -128,8 +130,8 @@ const StoryInput: React.FC = () => {
       custom: true,
     };
     
-    // Send story to webhook
-    await sendToWebhook({ title, theme });
+    // Send story to webhook only on form submission
+    await sendToWebhook({ title, content, theme });
     
     // Even if webhook fails, we still add the story locally
     addStory(newStory);
@@ -149,7 +151,7 @@ const StoryInput: React.FC = () => {
     // For now, we'll just simulate it
     
     try {
-      setTimeout(async () => {
+      setTimeout(() => {
         const storyTitles = [
           "The Adventure of the Magic Key",
           "Whispers in the Woodland",
@@ -172,19 +174,19 @@ const StoryInput: React.FC = () => {
         setTitle(generatedTitle);
         setContent(generatedContent);
         
-        // Send generated story to webhook
-        await sendToWebhook({
-          title: generatedTitle,
-          theme
-        });
-        
         toast({
           title: "Story generated!",
           description: "We've created a story starter for you to continue.",
         });
+        setIsGenerating(false);
       }, 1500);
-    } finally {
+    } catch (error) {
       setIsGenerating(false);
+      toast({
+        title: "Generation failed",
+        description: "Failed to generate a story starter. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
